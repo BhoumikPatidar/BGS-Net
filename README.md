@@ -7,7 +7,7 @@ Efficient Conditional Decoder Activation for Semantic Segmentation of Satellite 
 ## Project Overview
 
 Satellite images often contain targets (e.g., buildings, roads, water bodies) that occupy a small fraction of the scene. Standard encoder–decoder segmentation models like U‑Net perform full decoder computation on every patch, resulting in wasted resources when most patches lack targets.  
-**BGS‑Net** introduces a lightweight gating mechanism that analyzes the bottleneck features of a pre‑trained U‑Net to decide whether to execute the costly decoder for each patch, achieving major computational savings with minimal accuracy loss :contentReference[oaicite:0]{index=0}.
+**BGS‑Net** introduces a lightweight gating mechanism that analyzes the bottleneck features of a pre‑trained U‑Net to decide whether to execute the costly decoder for each patch, achieving major computational savings with minimal accuracy loss.
 
 ---
 
