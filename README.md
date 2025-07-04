@@ -1,36 +1,34 @@
-# Bottleneck-Gated Segmentation Network (BGS‑Net)
+# Bottleneck‑Gated Segmentation Network (BGS‑Net)
 
-Efficient Conditional Decoder Activation for Semantic Segmentation of Satellite Imagery
+**Efficient Conditional Decoder Activation for Semantic Segmentation of Satellite Imagery**
 
----
-
-## Project Overview
-
-Satellite images often contain targets (e.g., buildings, roads, water bodies) that occupy a small fraction of the scene. Standard encoder–decoder segmentation models like U‑Net perform full decoder computation on every patch, resulting in wasted resources when most patches lack targets.  
-**BGS‑Net** introduces a lightweight gating mechanism that analyzes the bottleneck features of a pre‑trained U‑Net to decide whether to execute the costly decoder for each patch, achieving major computational savings with minimal accuracy loss.
+Satellite images often contain targets (e.g., buildings, roads, water bodies) that occupy only a small fraction of the scene. Standard encoder–decoder models like U‑Net perform full decoder computation on every patch, wasting resources when most patches are background. BGS‑Net introduces a lightweight gating mechanism on the encoder’s bottleneck features to decide—per patch—whether to run the costly decoder, cutting compute by over 56% with minimal accuracy loss.
 
 ---
 
-## Key Contributions
+## Key Features
 
 - **Selective Decoder Activation**  
-  Uses a two‑stage gating function on bottleneck feature statistics to skip decoder execution on non‑ROI patches, reducing compute by **56.62%** :contentReference[oaicite:1]{index=1}.  
+  A two‑stage gate analyzes bottleneck activations to skip decoder computation on non‑ROI patches, reducing decoder FLOPs by **56.62%**.
 
 - **Zero Retraining Overhead**  
-  Works on any pre‑trained U‑Net without modifying weights or adding parameters; overhead is only ~0.0007% of a single decoder convolution :contentReference[oaicite:2]{index=2}.
+  Works with any pre‑trained U‑Net “as is”—no weight updates, no added parameters (overhead ≈ 0.0007% of one decoder conv).
 
-- **Competitive Segmentation Quality**  
-  Maintains a Building IoU of **0.6981**, versus **0.7145** for the vanilla U‑Net—a mere 2.3% relative drop focused on ROI patches :contentReference[oaicite:3]{index=3}.
+- **Competitive Accuracy**  
+  Building IoU of **0.6981** vs. **0.7145** for vanilla U‑Net (only a 2.3% relative drop focused on ROI patches).
 
-- **Generalizable Framework**  
-  Applicable to other sparse‑ROI tasks (medical scans, crop mapping, autonomous driving) by re‑analyzing bottleneck activations for new target classes :contentReference[oaicite:4]{index=4}.
+- **Plug‑and‑Play Generality**  
+  Easily applied to other sparse‑ROI tasks (medical lesions, crop mapping, road extraction).
 
 ---
 
 ## Problem Statement
 
-1. **High Computation Cost**: Decoder accounts for ~65–70% of U‑Net’s FLOPs on every patch, even when most patches are background :contentReference[oaicite:5]{index=5}.  
-2. **Sparse Targets**: In rural or suburban satellite scenes, buildings may cover <15% of pixels, leading to inefficiency in uniform processing :contentReference[oaicite:6]{index=6}.
+1. **High Decoder Cost**  
+   Decoder comprises ~65–70% of U‑Net’s FLOPs on every patch—even when most are background.
+
+2. **Sparse Targets**  
+   In many satellite scenes, buildings cover <15% of pixels, making uniform decoder use highly inefficient.
 
 ---
 
@@ -39,36 +37,77 @@ Satellite images often contain targets (e.g., buildings, roads, water bodies) th
 ### 1. Bottleneck Feature Analysis
 
 - **Bottleneck Tensor**  
-  Let **B** ∈ ℝ<sup>C×H′×W′</sup> be the output of the encoder bottleneck (C=1024 channels, H′×W′=32×32 for 512×512 input) :contentReference[oaicite:7]{index=7}.
+  \(B \in \mathbb{R}^{C\times H'\times W'}\), where \(C=1024\), \(H'\times W'=32\times32\) for a 512×512 input.
 
-- **Channel‑wise Mean Activation**  
-  \\
-  &nbsp;&nbsp;μ<sub>c</sub>(B) = (1/(H′·W′)) ∑<sub>i,j</sub> B<sub>c,i,j</sub>  
-  Captures the average response per channel, reflecting presence of target features :contentReference[oaicite:8]{index=8}.
+- **Channel‑wise Mean**  
+  \[
+    \mu_c(B) = \frac{1}{H'W'} \sum_{i,j} B_{c,i,j}
+  \]
+  Reflects average activation per channel.
 
-- **Discriminative Score (δ<sub>c</sub>)**  
-  Difference between mean activations on target vs. non‑target patches:  
-  δ<sub>c</sub> = |μ<sup>target</sup><sub>c</sub> – μ<sup>non‑target</sup><sub>c</sub>| :contentReference[oaicite:9]{index=9}.  
-  Channels with highest δ<sub>c</sub> are most informative.
+- **Discriminative Score**  
+  \(\delta_c = \bigl|\mu^{\text{target}}_c - \mu^{\text{non‑target}}_c\bigr|\).  
+  Channels with high \(\delta_c\) best separate ROI vs. background.
+
+### 2. Two‑Stage Gating
+
+1. **Stage 1: High‑Recall Detection**  
+   - Select top \(K_1\) channels by \(\delta_c\).  
+   - Threshold each channel via ROC‑derived \(\theta_c\):  
+     \(g_c(B) = [\mu_c(B) > \theta_c]\).  
+   - Combine with OR:  
+     \(\displaystyle G_1(B) = \bigvee_{c\in\mathcal{C}_1} g_c(B)\).
+
+2. **Stage 2: False‑Alarm Filtering**  
+   - Select \(K_2\) channels sensitive to common confounders.  
+   - Threshold via \(\gamma_c\):  
+     \(f_c(B) = [\mu_c(B) > \gamma_c]\).  
+   - Combine with AND:  
+     \(\displaystyle G_2(B) = \bigwedge_{c\in\mathcal{C}_2} f_c(B)\).
+
+3. **Final Gate**  
+   \[
+     G(B) = G_1(B) \;\wedge\; \neg G_2(B)
+   \]  
+   If \(G(B)=1\), run decoder; else output all‑background.
 
 ---
 
-### 2. Two‑Stage Gating Mechanism
+## Experimental Results
 
-#### Stage 1: Target Detection (High Recall)
-- **Select** K₁ channels with top δ<sub>c</sub> (e.g., channels 937, 117, 640 …)  
-- **Thresholding** via ROC‑derived θ<sub>c</sub>:  
-  gc(B,θ<sub>c</sub>) = 1 if μ<sub>c</sub>(B)>θ<sub>c</sub> (or <θ<sub>c</sub> for inverted channels)  
-- **Combine** with logical OR to maximize recall:  
-  G₁(B) = ∨<sub>i=1..K₁</sub> g<sub>cᵢ</sub>(B,θ<sub>cᵢ</sub>) :contentReference[oaicite:10]{index=10}.
+- **Dataset:** LandCoverAI (25 cm/pixel; classes: background, building, woodland, water, road).  
+- **Baseline U‑Net:** Building IoU = 0.7145  
+- **BGS‑Net:** Building IoU = 0.6981  
+- **Decoder Execution Rate:** 43.4% of patches → 56.6% compute saved.  
+- **Missed Cases:** Primarily very small buildings (~1.45% pixel coverage).
 
-#### Stage 2: False‑Alarm Filtering
-- **Select** K₂ channels sensitive to common non‑target confounders (e.g., dense woodland)  
-- **Thresholding** with γ<sub>c</sub> to detect false alarms:  
-  f<sub>c</sub>(B,γ<sub>c</sub>) = 1 if μ<sub>c</sub>(B)>γ<sub>c</sub>  
-- **Combine** with logical AND to filter only strong false alarms:  
-  G₂(B) = ∧<sub>i=1..K₂</sub> f<sub>cᵢ</sub>(B,γ<sub>cᵢ</sub>) :contentReference[oaicite:11]{index=11}.
+---
 
-#### Final Gate
-```text
-G(B) = G₁(B) ∧ ¬G₂(B)
+## Advantages
+
+- **Compute Efficiency:** Halves decoder FLOPs with negligible gating cost.  
+- **No Retraining:** Installs on pre‑trained models without weight changes.  
+- **Adaptable:** Gate can be re‑analyzed for any new sparse‑ROI class.  
+- **Complimentary:** Can be combined with pruning, quantization, or lightweight backbones.
+
+---
+
+## Applications
+
+- **Medical Imaging:** Skip decoder on lesion‑free slices in MRI/CT scans.  
+- **Agriculture:** Detect sparse disease or pest outbreaks in crop fields.  
+- **Autonomous Driving:** Omit segmentation on empty road segments.  
+- **Video Processing:** Leverage temporal coherence for frame‑level gating.
+
+---
+
+## Future Work
+
+- **Multi‑Class Gating:** Joint gating for several target classes.  
+- **Adaptive Thresholds:** Scene‑aware or dynamic gate parameters.  
+- **Temporal Gating:** Incorporate frame history for video segmentation.  
+- **Integration:** Merge with network compression and efficient backbone designs.
+
+---
+
+_By exploiting bottleneck activations already present in U‑Net, BGS‑Net makes sparse‑ROI segmentation practical at scale, delivering major compute savings with minimal impact on accuracy._  
